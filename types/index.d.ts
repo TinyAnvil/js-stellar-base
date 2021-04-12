@@ -1,7 +1,9 @@
 // TypeScript Version: 2.9
 
 /// <reference types="node" />
-export {};
+import { xdr } from './xdr';
+
+export { xdr };
 
 export class Account {
   constructor(accountId: string, sequence: string);
@@ -37,15 +39,30 @@ export class Asset {
   issuer: string;
 }
 
+export class Claimant {
+  readonly destination: string;
+  readonly predicate: xdr.ClaimPredicate;
+  constructor(destination: string, predicate?: xdr.ClaimPredicate);
+
+  toXDRObject(): xdr.Claimant;
+
+  static fromXDR(claimantXdr: xdr.Claimant): Claimant;
+  static predicateUnconditional(): xdr.ClaimPredicate;
+  static predicateAnd(left: xdr.ClaimPredicate, right: xdr.ClaimPredicate): xdr.ClaimPredicate;
+  static predicateOr(left: xdr.ClaimPredicate, right: xdr.ClaimPredicate): xdr.ClaimPredicate;
+  static predicateNot(predicate: xdr.ClaimPredicate): xdr.ClaimPredicate;
+  static predicateBeforeAbsoluteTime(absBefore: string): xdr.ClaimPredicate;
+  static predicateBeforeRelativeTime(seconds: string): xdr.ClaimPredicate;
+}
+
 export const FastSigning: boolean;
 
 export type KeypairType = 'ed25519';
 
 export class Keypair {
   static fromRawEd25519Seed(secretSeed: Buffer): Keypair;
-  static fromBase58Seed(secretSeed: string): Keypair;
   static fromSecret(secretKey: string): Keypair;
-  static master(networkPassphrase?: string): Keypair;
+  static master(networkPassphrase: string): Keypair;
   static fromPublicKey(publicKey: string): Keypair;
   static random(): Keypair;
 
@@ -61,10 +78,11 @@ export class Keypair {
   rawPublicKey(): Buffer;
   rawSecretKey(): Buffer;
   canSign(): boolean;
-  sign(data: Buffer): xdr.Signature;
+  sign(data: Buffer): Buffer;
   signDecorated(data: Buffer): xdr.DecoratedSignature;
-  signatureHint(): xdr.SignatureHint;
-  verify(data: Buffer, signature: xdr.Signature): boolean;
+  signatureHint(): Buffer;
+  verify(data: Buffer, signature: Buffer): boolean;
+  xdrAccountId(): xdr.AccountId;
 }
 
 export const MemoNone = 'none';
@@ -124,20 +142,6 @@ export enum Networks {
   TESTNET = 'Test SDF Network ; September 2015'
 }
 
-export class Network {
-  static use(network: Network): void;
-  static usePublicNetwork(): void;
-  static useTestNetwork(): void;
-  static current(): Network;
-  static networkPassphrase(): string;
-  static networkId(): string;
-
-  constructor(passphrase: string);
-
-  networkPassphrase(): string;
-  networkId(): string;
-}
-
 export const AuthRequiredFlag: 1;
 export const AuthRevocableFlag: 2;
 export const AuthImmutableFlag: 4;
@@ -150,6 +154,16 @@ export type AuthFlag =
   | AuthFlag.immutable
   | AuthFlag.required
   | AuthFlag.revocable;
+
+export namespace TrustLineFlag {
+  type deauthorize = 0;
+  type authorize = 1;
+  type authorizeToMaintainLiabilities = 2;
+}
+export type TrustLineFlag =
+  | TrustLineFlag.deauthorize
+  | TrustLineFlag.authorize
+  | TrustLineFlag.authorizeToMaintainLiabilities;
 
 export namespace Signer {
   interface Ed25519PublicKey {
@@ -165,10 +179,26 @@ export namespace Signer {
     weight: number | undefined;
   }
 }
+export namespace SignerKeyOptions {
+  interface Ed25519PublicKey {
+    ed25519PublicKey: string;
+  }
+  interface Sha256Hash {
+    sha256Hash: Buffer | string;
+  }
+  interface PreAuthTx {
+    preAuthTx: Buffer | string;
+  }
+}
 export type Signer =
   | Signer.Ed25519PublicKey
   | Signer.Sha256Hash
   | Signer.PreAuthTx;
+
+export type SignerKeyOptions =
+  | SignerKeyOptions.Ed25519PublicKey
+  | SignerKeyOptions.Sha256Hash
+  | SignerKeyOptions.PreAuthTx;
 
 export namespace SignerOptions {
   interface Ed25519PublicKey {
@@ -204,6 +234,14 @@ export namespace OperationType {
   type Inflation = 'inflation';
   type ManageData = 'manageData';
   type BumpSequence = 'bumpSequence';
+  type CreateClaimableBalance = 'createClaimableBalance';
+  type ClaimClaimableBalance = 'claimClaimableBalance';
+  type BeginSponsoringFutureReserves = 'beginSponsoringFutureReserves';
+  type EndSponsoringFutureReserves = 'endSponsoringFutureReserves';
+  type RevokeSponsorship = 'revokeSponsorship';
+  type Clawback = 'clawback';
+  type ClawbackClaimableBalance = 'clawbackClaimableBalance';
+  type SetTrustLineFlags = 'setTrustLineFlags';
 }
 export type OperationType =
   | OperationType.CreateAccount
@@ -219,7 +257,15 @@ export type OperationType =
   | OperationType.AccountMerge
   | OperationType.Inflation
   | OperationType.ManageData
-  | OperationType.BumpSequence;
+  | OperationType.BumpSequence
+  | OperationType.CreateClaimableBalance
+  | OperationType.ClaimClaimableBalance
+  | OperationType.BeginSponsoringFutureReserves
+  | OperationType.EndSponsoringFutureReserves
+  | OperationType.RevokeSponsorship
+  | OperationType.Clawback
+  | OperationType.ClawbackClaimableBalance
+  | OperationType.SetTrustLineFlags;
 
 export namespace OperationOptions {
   interface BaseOptions {
@@ -231,7 +277,7 @@ export namespace OperationOptions {
   interface AllowTrust extends BaseOptions {
     trustor: string;
     assetCode: string;
-    authorize?: boolean;
+    authorize?: boolean | TrustLineFlag;
   }
   interface ChangeTrust extends BaseOptions {
     asset: Asset;
@@ -263,7 +309,7 @@ export namespace OperationOptions {
   }
   interface ManageData extends BaseOptions {
     name: string;
-    value: string | Buffer;
+    value: string | Buffer | null;
   }
   interface PathPaymentStrictReceive extends BaseOptions {
     sendAsset: Asset;
@@ -300,6 +346,56 @@ export namespace OperationOptions {
   interface BumpSequence extends BaseOptions {
     bumpTo: string;
   }
+  interface CreateClaimableBalance extends BaseOptions {
+    asset: Asset;
+    amount: string;
+    claimants: Claimant[];
+  }
+  interface ClaimClaimableBalance extends BaseOptions {
+    balanceId: string;
+  }
+  interface BeginSponsoringFutureReserves extends BaseOptions {
+    sponsoredId: string;
+  }
+  interface RevokeAccountSponsorship extends BaseOptions {
+    account: string;
+  }
+  interface RevokeTrustlineSponsorship extends BaseOptions {
+    account: string;
+    asset: Asset;
+  }
+  interface RevokeOfferSponsorship extends BaseOptions {
+    seller: string;
+    offerId: string;
+  }
+  interface RevokeDataSponsorship extends BaseOptions {
+    account: string;
+    name: string;
+  }
+  interface RevokeClaimableBalanceSponsorship extends BaseOptions {
+    balanceId: string;
+  }
+  interface RevokeSignerSponsorship extends BaseOptions {
+    account: string;
+    signer: SignerKeyOptions;
+  }
+  interface Clawback extends BaseOptions {
+    asset: Asset;
+    amount: string;
+    from: string;
+  }
+  interface ClawbackClaimableBalance extends BaseOptions {
+    balanceId: string;
+  }
+  interface SetTrustLineFlags extends BaseOptions {
+    trustor: string;
+    asset: Asset;
+    flags: {
+      authorized?: boolean;
+      authorizedToMaintainLiabilities?: boolean;
+      clawbackEnabled?: boolean;
+    };
+  }
 }
 export type OperationOptions =
   | OperationOptions.CreateAccount
@@ -315,7 +411,19 @@ export type OperationOptions =
   | OperationOptions.AccountMerge
   | OperationOptions.Inflation
   | OperationOptions.ManageData
-  | OperationOptions.BumpSequence;
+  | OperationOptions.BumpSequence
+  | OperationOptions.CreateClaimableBalance
+  | OperationOptions.ClaimClaimableBalance
+  | OperationOptions.BeginSponsoringFutureReserves
+  | OperationOptions.RevokeAccountSponsorship
+  | OperationOptions.RevokeTrustlineSponsorship
+  | OperationOptions.RevokeOfferSponsorship
+  | OperationOptions.RevokeDataSponsorship
+  | OperationOptions.RevokeClaimableBalanceSponsorship
+  | OperationOptions.RevokeSignerSponsorship
+  | OperationOptions.Clawback
+  | OperationOptions.ClawbackClaimableBalance
+  | OperationOptions.SetTrustLineFlags;
 
 export namespace Operation {
   interface BaseOperation<T extends OperationType = OperationType> {
@@ -333,7 +441,8 @@ export namespace Operation {
   interface AllowTrust extends BaseOperation<OperationType.AllowTrust> {
     trustor: string;
     assetCode: string;
-    authorize: boolean | undefined;
+    // this is a boolean or a number so that it can support protocol 12 or 13
+    authorize: boolean | TrustLineFlag | undefined;
   }
   function allowTrust(
     options: OperationOptions.AllowTrust
@@ -373,7 +482,7 @@ export namespace Operation {
 
   interface ManageData extends BaseOperation<OperationType.ManageData> {
     name: string;
-    value: Buffer;
+    value?: Buffer;
   }
   function manageData(
     options: OperationOptions.ManageData
@@ -402,7 +511,8 @@ export namespace Operation {
     options: OperationOptions.ManageBuyOffer
   ): xdr.Operation<ManageBuyOffer>;
 
-  interface PathPaymentStrictReceive extends BaseOperation<OperationType.PathPaymentStrictReceive> {
+  interface PathPaymentStrictReceive
+    extends BaseOperation<OperationType.PathPaymentStrictReceive> {
     sendAsset: Asset;
     sendMax: string;
     destination: string;
@@ -414,11 +524,8 @@ export namespace Operation {
     options: OperationOptions.PathPaymentStrictReceive
   ): xdr.Operation<PathPaymentStrictReceive>;
 
-  function pathPayment(
-    options: OperationOptions.PathPaymentStrictReceive
-  ): xdr.Operation<PathPaymentStrictReceive>;
-
-  interface PathPaymentStrictSend extends BaseOperation<OperationType.PathPaymentStrictSend> {
+  interface PathPaymentStrictSend
+    extends BaseOperation<OperationType.PathPaymentStrictSend> {
     sendAsset: Asset;
     sendAmount: string;
     destination: string;
@@ -466,6 +573,110 @@ export namespace Operation {
     options: OperationOptions.BumpSequence
   ): xdr.Operation<BumpSequence>;
 
+  interface CreateClaimableBalance extends BaseOperation<OperationType.CreateClaimableBalance> {
+    amount: string;
+    asset: Asset;
+    claimants: Claimant[];
+  }
+  function createClaimableBalance(
+    options: OperationOptions.CreateClaimableBalance
+  ): xdr.Operation<CreateClaimableBalance>;
+
+  interface ClaimClaimableBalance extends BaseOperation<OperationType.ClaimClaimableBalance> {
+    balanceId: string;
+  }
+  function claimClaimableBalance(
+    options: OperationOptions.ClaimClaimableBalance
+  ): xdr.Operation<ClaimClaimableBalance>;
+
+  interface BeginSponsoringFutureReserves extends BaseOperation<OperationType.BeginSponsoringFutureReserves> {
+    sponsoredId: string;
+  }
+  function beginSponsoringFutureReserves(
+    options: OperationOptions.BeginSponsoringFutureReserves
+  ): xdr.Operation<BeginSponsoringFutureReserves>;
+
+  interface EndSponsoringFutureReserves extends BaseOperation<OperationType.EndSponsoringFutureReserves> {
+  }
+  function endSponsoringFutureReserves(
+    options: OperationOptions.BaseOptions
+  ): xdr.Operation<EndSponsoringFutureReserves>;
+
+  interface RevokeAccountSponsorship extends BaseOperation<OperationType.RevokeSponsorship> {
+    account: string;
+  }
+  function revokeAccountSponsorship(
+    options: OperationOptions.RevokeAccountSponsorship
+  ): xdr.Operation<RevokeAccountSponsorship>;
+
+  interface RevokeTrustlineSponsorship extends BaseOperation<OperationType.RevokeSponsorship> {
+    account: string;
+    asset: Asset;
+  }
+  function revokeTrustlineSponsorship(
+    options: OperationOptions.RevokeTrustlineSponsorship
+  ): xdr.Operation<RevokeTrustlineSponsorship>;
+
+  interface RevokeOfferSponsorship extends BaseOperation<OperationType.RevokeSponsorship> {
+    seller: string;
+    offerId: string;
+  }
+  function revokeOfferSponsorship(
+    options: OperationOptions.RevokeOfferSponsorship
+  ): xdr.Operation<RevokeOfferSponsorship>;
+
+  interface RevokeDataSponsorship extends BaseOperation<OperationType.RevokeSponsorship> {
+    account: string;
+    name: string;
+  }
+  function revokeDataSponsorship(
+    options: OperationOptions.RevokeDataSponsorship
+  ): xdr.Operation<RevokeDataSponsorship>;
+
+  interface RevokeClaimableBalanceSponsorship extends BaseOperation<OperationType.RevokeSponsorship> {
+    balanceId: string;
+  }
+  function revokeClaimableBalanceSponsorship(
+    options: OperationOptions.RevokeClaimableBalanceSponsorship
+  ): xdr.Operation<RevokeClaimableBalanceSponsorship>;
+
+  interface RevokeSignerSponsorship extends BaseOperation<OperationType.RevokeSponsorship> {
+    account: string;
+    signer: SignerKeyOptions;
+  }
+  function revokeSignerSponsorship(
+    options: OperationOptions.RevokeSignerSponsorship
+  ): xdr.Operation<RevokeSignerSponsorship>;
+
+  interface Clawback extends BaseOperation<OperationType.Clawback> {
+    asset: Asset;
+    amount: string;
+    from: string;
+  }
+  function clawback(
+    options: OperationOptions.Clawback
+  ): xdr.Operation<Clawback>;
+
+  interface ClawbackClaimableBalance extends BaseOperation<OperationType.ClawbackClaimableBalance> {
+    balanceId: string;
+  }
+  function clawbackClaimableBalance(
+    options: OperationOptions.ClawbackClaimableBalance
+  ): xdr.Operation<ClawbackClaimableBalance>;
+
+  interface SetTrustLineFlags extends BaseOperation<OperationType.SetTrustLineFlags> {
+    trustor: string;
+    asset: Asset;
+    flags: {
+      authorized?: boolean;
+      authorizedToMaintainLiabilities?: boolean;
+      clawbackEnabled?: boolean;
+    };
+  }
+  function setTrustLineFlags(
+    options: OperationOptions.SetTrustLineFlags
+  ): xdr.Operation<SetTrustLineFlags>;
+
   function fromXDRObject<T extends Operation = Operation>(
     xdrOperation: xdr.Operation<T>
   ): T;
@@ -484,7 +695,20 @@ export type Operation =
   | Operation.AccountMerge
   | Operation.Inflation
   | Operation.ManageData
-  | Operation.BumpSequence;
+  | Operation.BumpSequence
+  | Operation.CreateClaimableBalance
+  | Operation.ClaimClaimableBalance
+  | Operation.BeginSponsoringFutureReserves
+  | Operation.EndSponsoringFutureReserves
+  | Operation.RevokeAccountSponsorship
+  | Operation.RevokeTrustlineSponsorship
+  | Operation.RevokeOfferSponsorship
+  | Operation.RevokeDataSponsorship
+  | Operation.RevokeClaimableBalanceSponsorship
+  | Operation.RevokeSignerSponsorship
+  | Operation.Clawback
+  | Operation.ClawbackClaimableBalance
+  | Operation.SetTrustLineFlags;
 
 export namespace StrKey {
   function encodeEd25519PublicKey(data: Buffer): string;
@@ -502,33 +726,48 @@ export namespace StrKey {
   function decodeSha256Hash(data: string): Buffer;
 }
 
+export class TransactionI {
+  addSignature(publicKey: string, signature: string): void;
+  fee: string;
+  getKeypairSignature(keypair: Keypair): string;
+  hash(): Buffer;
+  networkPassphrase: string;
+  sign(...keypairs: Keypair[]): void;
+  signatureBase(): Buffer;
+  signatures: xdr.DecoratedSignature[];
+  signHashX(preimage: Buffer | string): void;
+  toEnvelope(): xdr.TransactionEnvelope;
+  toXDR(): string;
+}
+
+export class FeeBumpTransaction extends TransactionI {
+  constructor(
+    envelope: string | xdr.TransactionEnvelope,
+    networkPassphrase: string
+  );
+  feeSource: string;
+  innerTransaction: Transaction;
+}
+
 export class Transaction<
   TMemo extends Memo = Memo,
   TOps extends Operation[] = Operation[]
-> {
-  constructor(envelope: string | xdr.TransactionEnvelope, networkPassphrase?: string);
-  addSignature(publicKey: string, signature: string): void;
-  getKeypairSignature(keypair: Keypair): string;
-  hash(): Buffer;
-  sign(...keypairs: Keypair[]): void;
-  signatureBase(): Buffer;
-  signHashX(preimage: Buffer | string): void;
-  toEnvelope(): xdr.TransactionEnvelope;
-
+> extends TransactionI {
+  constructor(
+    envelope: string | xdr.TransactionEnvelope,
+    networkPassphrase: string
+  );
+  memo: TMemo;
   operations: TOps;
   sequence: string;
-  fee: number;
   source: string;
-  memo: TMemo;
-  networkPassphrase: string;
-  signatures: xdr.DecoratedSignature[];
   timeBounds?: {
     minTime: string;
     maxTime: string;
   };
 }
 
-export const BASE_FEE = 100;
+export const BASE_FEE = '100';
 export const TimeoutInfinite = 0;
 
 export class TransactionBuilder {
@@ -541,65 +780,35 @@ export class TransactionBuilder {
   setTimeout(timeoutInSeconds: number): this;
   build(): Transaction;
   setNetworkPassphrase(networkPassphrase: string): this;
+  static buildFeeBumpTransaction(
+    feeSource: Keypair,
+    baseFee: string,
+    innerTx: Transaction,
+    networkPassphrase: string
+  ): FeeBumpTransaction;
+  static fromXDR(
+    envelope: string | xdr.TransactionEnvelope,
+    networkPassphrase: string
+  ): Transaction | FeeBumpTransaction;
 }
 
 export namespace TransactionBuilder {
   interface TransactionBuilderOptions {
-    fee: number;
+    fee: string;
     timebounds?: {
       minTime?: number | string;
       maxTime?: number | string;
     };
     memo?: Memo;
     networkPassphrase?: string;
-  }
-}
-
-// Hidden namespace as hack to work around name collision.
-declare namespace xdrHidden {
-  // tslint:disable-line:strict-export-declare-modifiers
-  class Operation2<T extends Operation = Operation> extends xdr.XDRStruct {
-    static fromXDR(xdr: Buffer): xdr.Operation;
-  }
-}
-
-export namespace xdr {
-  class XDRStruct {
-    static fromXDR(xdr: Buffer): XDRStruct;
-
-    toXDR(base?: string): Buffer;
-    toXDR(encoding: string): string;
-  }
-  export import Operation = xdrHidden.Operation2; // tslint:disable-line:strict-export-declare-modifiers
-  class Asset extends XDRStruct {
-    static fromXDR(xdr: Buffer): Asset;
-  }
-  class Memo extends XDRStruct {
-    static fromXDR(xdr: Buffer): Memo;
-  }
-  class TransactionEnvelope extends XDRStruct {
-    static fromXDR(xdr: Buffer): TransactionEnvelope;
-  }
-  class DecoratedSignature extends XDRStruct {
-    static fromXDR(xdr: Buffer): DecoratedSignature;
-
-    constructor(keys: { hint: SignatureHint; signature: Signature });
-
-    hint(): SignatureHint;
-    signature(): Buffer;
-  }
-  type SignatureHint = Buffer;
-  type Signature = Buffer;
-
-  class TransactionResult extends XDRStruct {
-    static fromXDR(xdr: Buffer): TransactionResult;
+    v1?: boolean;
   }
 }
 
 export function hash(data: Buffer): Buffer;
-export function sign(data: Buffer, rawSecret: Buffer): xdr.Signature;
+export function sign(data: Buffer, rawSecret: Buffer): Buffer;
 export function verify(
   data: Buffer,
-  signature: xdr.Signature,
+  signature: Buffer,
   rawPublicKey: Buffer
 ): boolean;

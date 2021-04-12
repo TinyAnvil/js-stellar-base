@@ -9,10 +9,14 @@ import isNumber from 'lodash/isNumber';
 import isFinite from 'lodash/isFinite';
 import { best_r } from './util/continued_fraction';
 import { Asset } from './asset';
+import { Claimant } from './claimant';
 import { StrKey } from './strkey';
-import { Keypair } from './keypair';
 import xdr from './generated/stellar-xdr_generated';
 import * as ops from './operations/index';
+import {
+  decodeAddressToMuxedAccount,
+  encodeMuxedAccountToAddress
+} from './util/decode_encode_muxed_account';
 
 const ONE = 10000000;
 const MAX_INT64 = '9223372036854775807';
@@ -40,7 +44,7 @@ export const AuthRevocableFlag = 1 << 1;
 export const AuthImmutableFlag = 1 << 2;
 
 /**
- * `Operation` class represents [operations](https://www.stellar.org/developers/learn/concepts/operations.html) in Stellar network.
+ * `Operation` class represents [operations](https://www.stellar.org/developers/guides/concepts/operations.html) in Stellar network.
  * Use one of static methods to create operations:
  * * `{@link Operation.createAccount}`
  * * `{@link Operation.payment}`
@@ -56,24 +60,30 @@ export const AuthImmutableFlag = 1 << 2;
  * * `{@link Operation.inflation}`
  * * `{@link Operation.manageData}`
  * * `{@link Operation.bumpSequence}`
- *
- * These operations are deprecated and will be removed in a later version:
- * * `{@link Operation.manageOffer}`
- * * `{@link Operation.createPassiveOffer}`
- * * `{@link Operation.pathPayment}`
- *
+ * * `{@link Operation.createClaimableBalance}`
+ * * `{@link Operation.claimClaimableBalance}`
+ * * `{@link Operation.beginSponsoringFutureReserves}`
+ * * `{@link Operation.endSponsoringFutureReserves}`
+ * * `{@link Operation.revokeAccountSponsorship}`
+ * * `{@link Operation.revokeTrustlineSponsorship}`
+ * * `{@link Operation.revokeOfferSponsorship}`
+ * * `{@link Operation.revokeDataSponsorship}`
+ * * `{@link Operation.revokeClaimableBalanceSponsorship}`
+ * * `{@link Operation.revokeSignerSponsorship}`
+ * * `{@link Operation.clawback}`
+ * * `{@link Operation.clawbackClaimableBalance}`
+ * * `{@link Operation.setTrustLineFlags}`
  *
  * @class Operation
  */
 export class Operation {
   static setSourceAccount(opAttributes, opts) {
     if (opts.source) {
-      if (!StrKey.isValidEd25519PublicKey(opts.source)) {
+      try {
+        opAttributes.sourceAccount = decodeAddressToMuxedAccount(opts.source);
+      } catch (e) {
         throw new Error('Source address is invalid');
       }
-      opAttributes.sourceAccount = Keypair.fromPublicKey(
-        opts.source
-      ).xdrAccountId();
     }
   }
 
@@ -84,13 +94,9 @@ export class Operation {
    * @return {Operation}
    */
   static fromXDRObject(operation) {
-    function accountIdtoAddress(accountId) {
-      return StrKey.encodeEd25519PublicKey(accountId.ed25519());
-    }
-
     const result = {};
     if (operation.sourceAccount()) {
-      result.source = accountIdtoAddress(operation.sourceAccount());
+      result.source = encodeMuxedAccountToAddress(operation.sourceAccount());
     }
 
     const attrs = operation.body().value();
@@ -105,7 +111,7 @@ export class Operation {
       }
       case 'payment': {
         result.type = 'payment';
-        result.destination = accountIdtoAddress(attrs.destination());
+        result.destination = encodeMuxedAccountToAddress(attrs.destination());
         result.asset = Asset.fromOperation(attrs.asset());
         result.amount = this._fromXDRAmount(attrs.amount());
         break;
@@ -114,7 +120,7 @@ export class Operation {
         result.type = 'pathPaymentStrictReceive';
         result.sendAsset = Asset.fromOperation(attrs.sendAsset());
         result.sendMax = this._fromXDRAmount(attrs.sendMax());
-        result.destination = accountIdtoAddress(attrs.destination());
+        result.destination = encodeMuxedAccountToAddress(attrs.destination());
         result.destAsset = Asset.fromOperation(attrs.destAsset());
         result.destAmount = this._fromXDRAmount(attrs.destAmount());
         result.path = [];
@@ -131,7 +137,7 @@ export class Operation {
         result.type = 'pathPaymentStrictSend';
         result.sendAsset = Asset.fromOperation(attrs.sendAsset());
         result.sendAmount = this._fromXDRAmount(attrs.sendAmount());
-        result.destination = accountIdtoAddress(attrs.destination());
+        result.destination = encodeMuxedAccountToAddress(attrs.destination());
         result.destAsset = Asset.fromOperation(attrs.destAsset());
         result.destMin = this._fromXDRAmount(attrs.destMin());
         result.path = [];
@@ -161,7 +167,7 @@ export class Operation {
         result.authorize = attrs.authorize();
         break;
       }
-      case 'setOption': {
+      case 'setOptions': {
         result.type = 'setOptions';
         if (attrs.inflationDest()) {
           result.inflationDest = accountIdtoAddress(attrs.inflationDest());
@@ -236,10 +242,10 @@ export class Operation {
       }
       case 'accountMerge': {
         result.type = 'accountMerge';
-        result.destination = accountIdtoAddress(attrs);
+        result.destination = encodeMuxedAccountToAddress(attrs);
         break;
       }
-      case 'manageDatum': {
+      case 'manageData': {
         result.type = 'manageData';
         // manage_data.name is checked by iscntrl in stellar-core
         result.name = attrs.dataName().toString('ascii');
@@ -253,6 +259,80 @@ export class Operation {
       case 'bumpSequence': {
         result.type = 'bumpSequence';
         result.bumpTo = attrs.bumpTo().toString();
+        break;
+      }
+      case 'createClaimableBalance': {
+        result.type = 'createClaimableBalance';
+        result.asset = Asset.fromOperation(attrs.asset());
+        result.amount = this._fromXDRAmount(attrs.amount());
+        result.claimants = [];
+        attrs.claimants().forEach((claimant) => {
+          result.claimants.push(Claimant.fromXDR(claimant));
+        });
+        break;
+      }
+      case 'claimClaimableBalance': {
+        result.type = 'claimClaimableBalance';
+        result.balanceId = attrs.toXDR('hex');
+        break;
+      }
+      case 'beginSponsoringFutureReserves': {
+        result.type = 'beginSponsoringFutureReserves';
+        result.sponsoredId = accountIdtoAddress(attrs.sponsoredId());
+        break;
+      }
+      case 'endSponsoringFutureReserves': {
+        result.type = 'endSponsoringFutureReserves';
+        break;
+      }
+      case 'revokeSponsorship': {
+        extractRevokeSponshipDetails(attrs, result);
+        break;
+      }
+      case 'clawback': {
+        result.type = 'clawback';
+        result.amount = this._fromXDRAmount(attrs.amount());
+        result.from = encodeMuxedAccountToAddress(attrs.from());
+        result.asset = Asset.fromOperation(attrs.asset());
+        break;
+      }
+      case 'clawbackClaimableBalance': {
+        result.type = 'clawbackClaimableBalance';
+        result.balanceId = attrs.toXDR('hex');
+        break;
+      }
+      case 'setTrustLineFlags': {
+        result.type = 'setTrustLineFlags';
+        result.asset = Asset.fromOperation(attrs.asset());
+        result.trustor = accountIdtoAddress(attrs.trustor());
+
+        // Convert from the integer-bitwised flag into a sensible object that
+        // indicates true/false for each flag that's on/off.
+        const clears = attrs.clearFlags();
+        const sets = attrs.setFlags();
+
+        const mapping = {
+          authorized: xdr.TrustLineFlags.authorizedFlag(),
+          authorizedToMaintainLiabilities: xdr.TrustLineFlags.authorizedToMaintainLiabilitiesFlag(),
+          clawbackEnabled: xdr.TrustLineFlags.trustlineClawbackEnabledFlag()
+        };
+
+        const getFlagValue = (key) => {
+          const bit = mapping[key].value;
+          if (sets & bit) {
+            return true;
+          }
+          if (clears & bit) {
+            return false;
+          }
+          return undefined;
+        };
+
+        result.flags = {};
+        Object.keys(mapping).forEach((flagName) => {
+          result.flags[flagName] = getFlagValue(flagName);
+        });
+
         break;
       }
       default: {
@@ -387,23 +467,123 @@ export class Operation {
   }
 }
 
+function extractRevokeSponshipDetails(attrs, result) {
+  switch (attrs.switch().name) {
+    case 'revokeSponsorshipLedgerEntry': {
+      const ledgerKey = attrs.ledgerKey();
+      switch (ledgerKey.switch().name) {
+        case xdr.LedgerEntryType.account().name: {
+          result.type = 'revokeAccountSponsorship';
+          result.account = accountIdtoAddress(ledgerKey.account().accountId());
+          break;
+        }
+        case xdr.LedgerEntryType.trustline().name: {
+          result.type = 'revokeTrustlineSponsorship';
+          result.account = accountIdtoAddress(
+            ledgerKey.trustLine().accountId()
+          );
+          result.asset = Asset.fromOperation(ledgerKey.trustLine().asset());
+          break;
+        }
+        case xdr.LedgerEntryType.offer().name: {
+          result.type = 'revokeOfferSponsorship';
+          result.seller = accountIdtoAddress(ledgerKey.offer().sellerId());
+          result.offerId = ledgerKey
+            .offer()
+            .offerId()
+            .toString();
+          break;
+        }
+        case xdr.LedgerEntryType.data().name: {
+          result.type = 'revokeDataSponsorship';
+          result.account = accountIdtoAddress(ledgerKey.data().accountId());
+          result.name = ledgerKey
+            .data()
+            .dataName()
+            .toString('ascii');
+          break;
+        }
+        case xdr.LedgerEntryType.claimableBalance().name: {
+          result.type = 'revokeClaimableBalanceSponsorship';
+          result.balanceId = ledgerKey
+            .claimableBalance()
+            .balanceId()
+            .toXDR('hex');
+          break;
+        }
+        default: {
+          throw new Error(`Unknown ledgerKey: ${attrs.switch().name}`);
+        }
+      }
+      break;
+    }
+    case 'revokeSponsorshipSigner': {
+      result.type = 'revokeSignerSponsorship';
+      result.account = accountIdtoAddress(attrs.signer().accountId());
+      result.signer = convertXDRSignerKeyToObject(attrs.signer().signerKey());
+      break;
+    }
+    default: {
+      throw new Error(`Unknown revokeSponsorship: ${attrs.switch().name}`);
+    }
+  }
+}
+
+function convertXDRSignerKeyToObject(signerKey) {
+  const attrs = {};
+  switch (signerKey.switch().name) {
+    case xdr.SignerKeyType.signerKeyTypeEd25519().name: {
+      attrs.ed25519PublicKey = StrKey.encodeEd25519PublicKey(
+        signerKey.ed25519()
+      );
+      break;
+    }
+    case xdr.SignerKeyType.signerKeyTypePreAuthTx().name: {
+      attrs.preAuthTx = signerKey.preAuthTx().toString('hex');
+      break;
+    }
+    case xdr.SignerKeyType.signerKeyTypeHashX().name: {
+      attrs.sha256Hash = signerKey.hashX().toString('hex');
+      break;
+    }
+    default: {
+      throw new Error(`Unknown signerKey: ${signerKey.switch().name}`);
+    }
+  }
+
+  return attrs;
+}
+
+function accountIdtoAddress(accountId) {
+  return StrKey.encodeEd25519PublicKey(accountId.ed25519());
+}
+
 // Attach all imported operations as static methods on the Operation class
 Operation.accountMerge = ops.accountMerge;
 Operation.allowTrust = ops.allowTrust;
 Operation.bumpSequence = ops.bumpSequence;
 Operation.changeTrust = ops.changeTrust;
 Operation.createAccount = ops.createAccount;
+Operation.createClaimableBalance = ops.createClaimableBalance;
+Operation.claimClaimableBalance = ops.claimClaimableBalance;
+Operation.clawbackClaimableBalance = ops.clawbackClaimableBalance;
 Operation.createPassiveSellOffer = ops.createPassiveSellOffer;
 Operation.inflation = ops.inflation;
 Operation.manageData = ops.manageData;
 Operation.manageSellOffer = ops.manageSellOffer;
 Operation.manageBuyOffer = ops.manageBuyOffer;
-Operation.pathPayment = ops.pathPayment;
 Operation.pathPaymentStrictReceive = ops.pathPaymentStrictReceive;
 Operation.pathPaymentStrictSend = ops.pathPaymentStrictSend;
 Operation.payment = ops.payment;
 Operation.setOptions = ops.setOptions;
-
-// deprecated, to be removed after 1.0.1
-Operation.manageOffer = ops.manageOffer;
-Operation.createPassiveOffer = ops.createPassiveOffer;
+Operation.beginSponsoringFutureReserves = ops.beginSponsoringFutureReserves;
+Operation.endSponsoringFutureReserves = ops.endSponsoringFutureReserves;
+Operation.revokeAccountSponsorship = ops.revokeAccountSponsorship;
+Operation.revokeTrustlineSponsorship = ops.revokeTrustlineSponsorship;
+Operation.revokeOfferSponsorship = ops.revokeOfferSponsorship;
+Operation.revokeDataSponsorship = ops.revokeDataSponsorship;
+Operation.revokeClaimableBalanceSponsorship =
+  ops.revokeClaimableBalanceSponsorship;
+Operation.revokeSignerSponsorship = ops.revokeSignerSponsorship;
+Operation.clawback = ops.clawback;
+Operation.setTrustLineFlags = ops.setTrustLineFlags;

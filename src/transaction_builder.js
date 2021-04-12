@@ -5,8 +5,8 @@ import isUndefined from 'lodash/isUndefined';
 import xdr from './generated/stellar-xdr_generated';
 import { Keypair } from './keypair';
 import { Transaction } from './transaction';
+import { FeeBumpTransaction } from './fee_bump_transaction';
 import { Memo } from './memo';
-import { Network } from './network';
 
 /**
  * Minimum base fee for transactions. If this fee is below the network
@@ -18,7 +18,7 @@ import { Network } from './network';
  * @constant
  * @see [Fees](https://www.stellar.org/developers/guides/concepts/fees.html)
  */
-export const BASE_FEE = 100; // Stroops
+export const BASE_FEE = '100'; // Stroops
 
 /**
  * @constant
@@ -71,7 +71,7 @@ export const TimeoutInfinite = 0;
  * @constructor
  * @param {Account} sourceAccount - The source account for this transaction.
  * @param {object} opts Options object
- * @param {number} opts.fee - The max fee willing to pay per operation in this transaction (**in stroops**). Required.
+ * @param {string} opts.fee - The max fee willing to pay per operation in this transaction (**in stroops**). Required.
  * @param {object} [opts.timebounds] - The timebounds for the validity of this transaction.
  * @param {number|string|Date} [opts.timebounds.minTime] - 64 bit unix timestamp or Date object
  * @param {number|string|Date} [opts.timebounds.maxTime] - 64 bit unix timestamp or Date object
@@ -94,7 +94,6 @@ export class TransactionBuilder {
     this.baseFee = isUndefined(opts.fee) ? BASE_FEE : opts.fee;
     this.timebounds = clone(opts.timebounds) || null;
     this.memo = opts.memo || Memo.none();
-    this.timeoutSet = false;
     this.networkPassphrase = opts.networkPassphrase || null;
   }
 
@@ -137,7 +136,7 @@ export class TransactionBuilder {
    * @see TimeoutInfinite
    */
   setTimeout(timeout) {
-    if (this.timebounds != null && this.timebounds.maxTime > 0) {
+    if (this.timebounds !== null && this.timebounds.maxTime > 0) {
       throw new Error(
         'TimeBounds.max_time has been already set - setting timeout would overwrite it.'
       );
@@ -147,7 +146,6 @@ export class TransactionBuilder {
       throw new Error('timeout cannot be negative');
     }
 
-    this.timeoutSet = true;
     if (timeout > 0) {
       const timeoutTimestamp = Math.floor(Date.now() / 1000) + timeout;
       if (this.timebounds === null) {
@@ -158,6 +156,11 @@ export class TransactionBuilder {
           maxTime: timeoutTimestamp
         };
       }
+    } else {
+      this.timebounds = {
+        minTime: 0,
+        maxTime: 0
+      };
     }
 
     return this;
@@ -180,56 +183,150 @@ export class TransactionBuilder {
    * @returns {Transaction} This method will return the built {@link Transaction}.
    */
   build() {
-    // Ensure setTimeout called or maxTime is set
+    const sequenceNumber = new BigNumber(this.source.sequenceNumber()).add(1);
+    const fee = new BigNumber(this.baseFee)
+      .mul(this.operations.length)
+      .toNumber();
+    const attrs = {
+      fee,
+      seqNum: xdr.SequenceNumber.fromString(sequenceNumber.toString()),
+      memo: this.memo ? this.memo.toXDRObject() : null
+    };
+
     if (
-      (this.timebounds === null ||
-        (this.timebounds !== null && this.timebounds.maxTime === 0)) &&
-      !this.timeoutSet
+      this.timebounds === null ||
+      typeof this.timebounds.minTime === 'undefined' ||
+      typeof this.timebounds.maxTime === 'undefined'
     ) {
       throw new Error(
         'TimeBounds has to be set or you must call setTimeout(TimeoutInfinite).'
       );
     }
 
-    const sequenceNumber = new BigNumber(this.source.sequenceNumber()).add(1);
-
-    const attrs = {
-      sourceAccount: Keypair.fromPublicKey(
-        this.source.accountId()
-      ).xdrAccountId(),
-      fee: this.baseFee * this.operations.length,
-      seqNum: xdr.SequenceNumber.fromString(sequenceNumber.toString()),
-      memo: this.memo ? this.memo.toXDRObject() : null,
-      ext: new xdr.TransactionExt(0)
-    };
-
-    if (this.timebounds) {
-      if (isValidDate(this.timebounds.minTime)) {
-        this.timebounds.minTime = this.timebounds.minTime.getTime() / 1000;
-      }
-      if (isValidDate(this.timebounds.maxTime)) {
-        this.timebounds.maxTime = this.timebounds.maxTime.getTime() / 1000;
-      }
-
-      this.timebounds.minTime = UnsignedHyper.fromString(
-        this.timebounds.minTime.toString()
-      );
-      this.timebounds.maxTime = UnsignedHyper.fromString(
-        this.timebounds.maxTime.toString()
-      );
-
-      attrs.timeBounds = new xdr.TimeBounds(this.timebounds);
+    if (isValidDate(this.timebounds.minTime)) {
+      this.timebounds.minTime = this.timebounds.minTime.getTime() / 1000;
     }
+    if (isValidDate(this.timebounds.maxTime)) {
+      this.timebounds.maxTime = this.timebounds.maxTime.getTime() / 1000;
+    }
+
+    this.timebounds.minTime = UnsignedHyper.fromString(
+      this.timebounds.minTime.toString()
+    );
+    this.timebounds.maxTime = UnsignedHyper.fromString(
+      this.timebounds.maxTime.toString()
+    );
+
+    attrs.timeBounds = new xdr.TimeBounds(this.timebounds);
+    attrs.sourceAccount = Keypair.fromPublicKey(
+      this.source.accountId()
+    ).xdrMuxedAccount();
+    attrs.ext = new xdr.TransactionExt(0);
 
     const xtx = new xdr.Transaction(attrs);
     xtx.operations(this.operations);
+    const txEnvelope = new xdr.TransactionEnvelope.envelopeTypeTx(
+      new xdr.TransactionV1Envelope({ tx: xtx })
+    );
 
-    const xenv = new xdr.TransactionEnvelope({ tx: xtx });
-    const tx = new Transaction(xenv, this.networkPassphrase);
+    const tx = new Transaction(txEnvelope, this.networkPassphrase);
 
     this.source.incrementSequenceNumber();
 
     return tx;
+  }
+
+  /**
+   * Builds a {@link FeeBumpTransaction}
+   * @param {Keypair} feeSource - The account paying for the transaction.
+   * @param {string} baseFee - The max fee willing to pay per operation in inner transaction (**in stroops**). Required.
+   * @param {Transaction} innerTx - The Transaction to be bumped by the fee bump transaction.
+   * @param {string} networkPassphrase - networkPassphrase of the target stellar network (e.g. "Public Global Stellar Network ; September 2015").
+   * @returns {FeeBumpTransaction}
+   */
+  static buildFeeBumpTransaction(
+    feeSource,
+    baseFee,
+    innerTx,
+    networkPassphrase
+  ) {
+    const innerOps = innerTx.operations.length;
+    const innerBaseFeeRate = new BigNumber(innerTx.fee).div(innerOps);
+    const base = new BigNumber(baseFee);
+
+    // The fee rate for fee bump is at least the fee rate of the inner transaction
+    if (base.lessThan(innerBaseFeeRate)) {
+      throw new Error(
+        `Invalid baseFee, it should be at least ${innerBaseFeeRate} stroops.`
+      );
+    }
+
+    const minBaseFee = new BigNumber(BASE_FEE);
+
+    // The fee rate is at least the minimum fee
+    if (base.lessThan(minBaseFee)) {
+      throw new Error(
+        `Invalid baseFee, it should be at least ${minBaseFee} stroops.`
+      );
+    }
+
+    let innerTxEnvelope = innerTx.toEnvelope();
+    if (innerTxEnvelope.switch() === xdr.EnvelopeType.envelopeTypeTxV0()) {
+      const v0Tx = innerTxEnvelope.v0().tx();
+      const v1Tx = new xdr.Transaction({
+        sourceAccount: new xdr.MuxedAccount.keyTypeEd25519(
+          v0Tx.sourceAccountEd25519()
+        ),
+        fee: v0Tx.fee(),
+        seqNum: v0Tx.seqNum(),
+        timeBounds: v0Tx.timeBounds(),
+        memo: v0Tx.memo(),
+        operations: v0Tx.operations(),
+        ext: new xdr.TransactionExt(0)
+      });
+      innerTxEnvelope = new xdr.TransactionEnvelope.envelopeTypeTx(
+        new xdr.TransactionV1Envelope({
+          tx: v1Tx,
+          signatures: innerTxEnvelope.v0().signatures()
+        })
+      );
+    }
+
+    const tx = new xdr.FeeBumpTransaction({
+      feeSource: feeSource.xdrMuxedAccount(),
+      fee: xdr.Int64.fromString(base.mul(innerOps + 1).toString()),
+      innerTx: xdr.FeeBumpTransactionInnerTx.envelopeTypeTx(
+        innerTxEnvelope.v1()
+      ),
+      ext: new xdr.FeeBumpTransactionExt(0)
+    });
+    const feeBumpTxEnvelope = new xdr.FeeBumpTransactionEnvelope({
+      tx,
+      signatures: []
+    });
+    const envelope = new xdr.TransactionEnvelope.envelopeTypeTxFeeBump(
+      feeBumpTxEnvelope
+    );
+
+    return new FeeBumpTransaction(envelope, networkPassphrase);
+  }
+
+  /**
+   * Build a {@link Transaction} or {@link FeeBumpTransaction} from an xdr.TransactionEnvelope.
+   * @param {string|xdr.TransactionEnvelope} envelope - The transaction envelope object or base64 encoded string.
+   * @param {string} networkPassphrase - networkPassphrase of the target stellar network (e.g. "Public Global Stellar Network ; September 2015").
+   * @returns {Transaction|FeeBumpTransaction}
+   */
+  static fromXDR(envelope, networkPassphrase) {
+    if (typeof envelope === 'string') {
+      envelope = xdr.TransactionEnvelope.fromXDR(envelope, 'base64');
+    }
+
+    if (envelope.switch() === xdr.EnvelopeType.envelopeTypeTxFeeBump()) {
+      return new FeeBumpTransaction(envelope, networkPassphrase);
+    }
+
+    return new Transaction(envelope, networkPassphrase);
   }
 }
 

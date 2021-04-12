@@ -1,6 +1,5 @@
 import xdr from '../generated/stellar-xdr_generated';
-import { Keypair } from '../keypair';
-import { StrKey } from '../strkey';
+import { decodeAddressToMuxedAccount } from '../util/decode_encode_muxed_account';
 
 /**
  * Returns a XDR PathPaymentStrictSendOp. A `PathPaymentStrictSend` operation send the specified amount to the
@@ -24,8 +23,6 @@ export function pathPaymentStrictSend(opts) {
       throw new Error('Must specify a send asset');
     case !this.isValidAmount(opts.sendAmount):
       throw new TypeError(this.constructAmountRequirementsError('sendAmount'));
-    case !StrKey.isValidEd25519PublicKey(opts.destination):
-      throw new Error('destination is invalid');
     case !opts.destAsset:
       throw new Error('Must provide a destAsset for a payment operation');
     case !this.isValidAmount(opts.destMin):
@@ -37,9 +34,11 @@ export function pathPaymentStrictSend(opts) {
   const attributes = {};
   attributes.sendAsset = opts.sendAsset.toXDRObject();
   attributes.sendAmount = this._toXDRAmount(opts.sendAmount);
-  attributes.destination = Keypair.fromPublicKey(
-    opts.destination
-  ).xdrAccountId();
+  try {
+    attributes.destination = decodeAddressToMuxedAccount(opts.destination);
+  } catch (e) {
+    throw new Error('destination is invalid');
+  }
   attributes.destAsset = opts.destAsset.toXDRObject();
   attributes.destMin = this._toXDRAmount(opts.destMin);
 

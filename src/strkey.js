@@ -144,7 +144,7 @@ export function decodeCheck(versionByteName, encoded) {
 
   if (isUndefined(expectedVersion)) {
     throw new Error(
-      `${versionByteName} is not a valid version byte name.  expected one of "accountId" or "seed"`
+      `${versionByteName} is not a valid version byte name. Expected one of "ed25519PublicKey", "ed25519SecretSeed", "preAuthTx", "sha256Hash", "muxedAccount"`
     );
   }
 
@@ -172,11 +172,11 @@ export function encodeCheck(versionByteName, data) {
 
   if (isUndefined(versionByte)) {
     throw new Error(
-      `${versionByteName} is not a valid version byte name.  expected one of "ed25519PublicKey", "ed25519SecretSeed", "preAuthTx", "sha256Hash"`
+      `${versionByteName} is not a valid version byte name. Expected one of "ed25519PublicKey", "ed25519SecretSeed", "preAuthTx", "sha256Hash", "muxedAccount"`
     );
   }
-
   data = Buffer.from(data);
+
   const versionBuffer = Buffer.from([versionByte]);
   const payload = Buffer.concat([versionBuffer, data]);
   const checksum = calculateChecksum(payload);

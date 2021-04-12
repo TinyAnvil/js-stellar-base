@@ -28,7 +28,6 @@ describe('Operation', function() {
       ).to.be.equal('10000000000');
       expect(obj.startingBalance).to.be.equal(startingBalance);
     });
-
     it('fails to create createAccount operation with an invalid destination address', function() {
       let opts = {
         destination: 'GCEZW',
@@ -40,6 +39,17 @@ describe('Operation', function() {
       );
     });
 
+    it('creates a createAccount operation with startingBalance equal to 0', function() {
+      let opts = {
+        destination: 'GCEZWKCA5VLDNRLN3RPRJMRZOX3Z6G5CHCGSNFHEYVXM3XOJMDS674JZ',
+        startingBalance: '0',
+        source: 'GCEZWKCA5VLDNRLN3RPRJMRZOX3Z6G5CHCGSNFHEYVXM3XOJMDS674JZ'
+      };
+      expect(() => StellarBase.Operation.createAccount(opts)).not.to.throw(
+        /startingBalance must be of type String, represent a non-negative number and have at most 7 digits after the decimal/
+      );
+    });
+
     it('fails to create createAccount operation with an invalid startingBalance', function() {
       let opts = {
         destination: 'GCEZWKCA5VLDNRLN3RPRJMRZOX3Z6G5CHCGSNFHEYVXM3XOJMDS674JZ',
@@ -47,7 +57,7 @@ describe('Operation', function() {
         source: 'GCEZWKCA5VLDNRLN3RPRJMRZOX3Z6G5CHCGSNFHEYVXM3XOJMDS674JZ'
       };
       expect(() => StellarBase.Operation.createAccount(opts)).to.throw(
-        /startingBalance argument must be of type String, represent a positive number and have at most 7 digits after the decimal/
+        /startingBalance must be of type String, represent a non-negative number and have at most 7 digits after the decimal/
       );
     });
 
@@ -80,15 +90,26 @@ describe('Operation', function() {
       var obj = StellarBase.Operation.fromXDRObject(operation);
       expect(obj.type).to.be.equal('payment');
       expect(obj.destination).to.be.equal(destination);
-      expect(
-        operation
-          .body()
-          .value()
-          .amount()
-          .toString()
-      ).to.be.equal('10000000000');
-      expect(obj.amount).to.be.equal(amount);
-      expect(obj.asset.equals(asset)).to.be.true;
+    });
+    it('does not support muxed accounts', function() {
+      var destination =
+        'MAAAAAAAAAAAAAB7BQ2L7E5NBWMXDUCMZSIPOBKRDSBYVLMXGSSKF6YNPIB7Y77ITLVL6';
+      var amount = '1000.0000000';
+      var asset = new StellarBase.Asset(
+        'USDUSD',
+        'GDGU5OAPHNPU5UCLE5RDJHG7PXZFQYWKCFOEXSXNMR6KRQRI5T6XXCD7'
+      );
+      var source =
+        'MAAAAAAAAAAAAAB7BQ2L7E5NBWMXDUCMZSIPOBKRDSBYVLMXGSSKF6YNPIB7Y77ITLVL6';
+
+      expect(() => {
+        StellarBase.Operation.payment({
+          destination,
+          asset,
+          amount,
+          source
+        });
+      }).to.throw(/destination is invalid/);
     });
 
     it('fails to create payment operation with an invalid destination address', function() {
@@ -110,122 +131,6 @@ describe('Operation', function() {
       };
       expect(() => StellarBase.Operation.payment(opts)).to.throw(
         /amount argument must be of type String/
-      );
-    });
-  });
-
-  describe('.pathPayment()', function() {
-    it('creates a pathPaymentStrictReceiveOp', function() {
-      var sendAsset = new StellarBase.Asset(
-        'USD',
-        'GDGU5OAPHNPU5UCLE5RDJHG7PXZFQYWKCFOEXSXNMR6KRQRI5T6XXCD7'
-      );
-      var sendMax = '3.0070000';
-      var destination =
-        'GCEZWKCA5VLDNRLN3RPRJMRZOX3Z6G5CHCGSNFHEYVXM3XOJMDS674JZ';
-      var destAsset = new StellarBase.Asset(
-        'USD',
-        'GDGU5OAPHNPU5UCLE5RDJHG7PXZFQYWKCFOEXSXNMR6KRQRI5T6XXCD7'
-      );
-      var destAmount = '3.1415000';
-      var path = [
-        new StellarBase.Asset(
-          'USD',
-          'GBBM6BKZPEHWYO3E3YKREDPQXMS4VK35YLNU7NFBRI26RAN7GI5POFBB'
-        ),
-        new StellarBase.Asset(
-          'EUR',
-          'GDTNXRLOJD2YEBPKK7KCMR7J33AAG5VZXHAJTHIG736D6LVEFLLLKPDL'
-        )
-      ];
-      let op = StellarBase.Operation.pathPayment({
-        sendAsset,
-        sendMax,
-        destination,
-        destAsset,
-        destAmount,
-        path
-      });
-      var xdr = op.toXDR('hex');
-      var operation = StellarBase.xdr.Operation.fromXDR(
-        Buffer.from(xdr, 'hex')
-      );
-      var obj = StellarBase.Operation.fromXDRObject(operation);
-      expect(obj.type).to.be.equal('pathPaymentStrictReceive');
-      expect(obj.sendAsset.equals(sendAsset)).to.be.true;
-      expect(
-        operation
-          .body()
-          .value()
-          .sendMax()
-          .toString()
-      ).to.be.equal('30070000');
-      expect(obj.sendMax).to.be.equal(sendMax);
-      expect(obj.destination).to.be.equal(destination);
-      expect(obj.destAsset.equals(destAsset)).to.be.true;
-      expect(
-        operation
-          .body()
-          .value()
-          .destAmount()
-          .toString()
-      ).to.be.equal('31415000');
-      expect(obj.destAmount).to.be.equal(destAmount);
-      expect(obj.path[0].getCode()).to.be.equal('USD');
-      expect(obj.path[0].getIssuer()).to.be.equal(
-        'GBBM6BKZPEHWYO3E3YKREDPQXMS4VK35YLNU7NFBRI26RAN7GI5POFBB'
-      );
-      expect(obj.path[1].getCode()).to.be.equal('EUR');
-      expect(obj.path[1].getIssuer()).to.be.equal(
-        'GDTNXRLOJD2YEBPKK7KCMR7J33AAG5VZXHAJTHIG736D6LVEFLLLKPDL'
-      );
-    });
-
-    it('fails to create path payment operation with an invalid destination address', function() {
-      let opts = {
-        destination: 'GCEZW',
-        sendMax: '20',
-        destAmount: '50',
-        sendAsset: StellarBase.Asset.native(),
-        destAsset: new StellarBase.Asset(
-          'USD',
-          'GDGU5OAPHNPU5UCLE5RDJHG7PXZFQYWKCFOEXSXNMR6KRQRI5T6XXCD7'
-        )
-      };
-      expect(() => StellarBase.Operation.pathPayment(opts)).to.throw(
-        /destination is invalid/
-      );
-    });
-
-    it('fails to create path payment operation with an invalid sendMax', function() {
-      let opts = {
-        destination: 'GCEZWKCA5VLDNRLN3RPRJMRZOX3Z6G5CHCGSNFHEYVXM3XOJMDS674JZ',
-        sendMax: 20,
-        destAmount: '50',
-        sendAsset: StellarBase.Asset.native(),
-        destAsset: new StellarBase.Asset(
-          'USD',
-          'GDGU5OAPHNPU5UCLE5RDJHG7PXZFQYWKCFOEXSXNMR6KRQRI5T6XXCD7'
-        )
-      };
-      expect(() => StellarBase.Operation.pathPayment(opts)).to.throw(
-        /sendMax argument must be of type String/
-      );
-    });
-
-    it('fails to create path payment operation with an invalid destAmount', function() {
-      let opts = {
-        destination: 'GCEZWKCA5VLDNRLN3RPRJMRZOX3Z6G5CHCGSNFHEYVXM3XOJMDS674JZ',
-        sendMax: '20',
-        destAmount: 50,
-        sendAsset: StellarBase.Asset.native(),
-        destAsset: new StellarBase.Asset(
-          'USD',
-          'GDGU5OAPHNPU5UCLE5RDJHG7PXZFQYWKCFOEXSXNMR6KRQRI5T6XXCD7'
-        )
-      };
-      expect(() => StellarBase.Operation.pathPayment(opts)).to.throw(
-        /destAmount argument must be of type String/
       );
     });
   });
@@ -296,7 +201,43 @@ describe('Operation', function() {
         'GDTNXRLOJD2YEBPKK7KCMR7J33AAG5VZXHAJTHIG736D6LVEFLLLKPDL'
       );
     });
-
+    it('does not support muxed accounts', function() {
+      var sendAsset = new StellarBase.Asset(
+        'USD',
+        'GDGU5OAPHNPU5UCLE5RDJHG7PXZFQYWKCFOEXSXNMR6KRQRI5T6XXCD7'
+      );
+      var sendMax = '3.0070000';
+      var destination =
+        'MAAAAAAAAAAAAAB7BQ2L7E5NBWMXDUCMZSIPOBKRDSBYVLMXGSSKF6YNPIB7Y77ITLVL6';
+      var source =
+        'MAAAAAAAAAAAAAB7BQ2L7E5NBWMXDUCMZSIPOBKRDSBYVLMXGSSKF6YNPIB7Y77ITLVL6';
+      var destAsset = new StellarBase.Asset(
+        'USD',
+        'GDGU5OAPHNPU5UCLE5RDJHG7PXZFQYWKCFOEXSXNMR6KRQRI5T6XXCD7'
+      );
+      var destAmount = '3.1415000';
+      var path = [
+        new StellarBase.Asset(
+          'USD',
+          'GBBM6BKZPEHWYO3E3YKREDPQXMS4VK35YLNU7NFBRI26RAN7GI5POFBB'
+        ),
+        new StellarBase.Asset(
+          'EUR',
+          'GDTNXRLOJD2YEBPKK7KCMR7J33AAG5VZXHAJTHIG736D6LVEFLLLKPDL'
+        )
+      ];
+      expect(() => {
+        StellarBase.Operation.pathPaymentStrictReceive({
+          sendAsset,
+          sendMax,
+          destination,
+          destAsset,
+          destAmount,
+          path,
+          source
+        });
+      }).to.throw(/destination is invalid/);
+    });
     it('fails to create path payment operation with an invalid destination address', function() {
       let opts = {
         destination: 'GCEZW',
@@ -412,7 +353,39 @@ describe('Operation', function() {
         'GDTNXRLOJD2YEBPKK7KCMR7J33AAG5VZXHAJTHIG736D6LVEFLLLKPDL'
       );
     });
-
+    it('does not support muxed accounts', function() {
+      var sendAsset = new StellarBase.Asset(
+        'USD',
+        'GDGU5OAPHNPU5UCLE5RDJHG7PXZFQYWKCFOEXSXNMR6KRQRI5T6XXCD7'
+      );
+      var sendAmount = '3.0070000';
+      var destination =
+        'MAAAAAAAAAAAAAB7BQ2L7E5NBWMXDUCMZSIPOBKRDSBYVLMXGSSKF6YNPIB7Y77ITLVL6';
+      var source =
+        'MAAAAAAAAAAAAAB7BQ2L7E5NBWMXDUCMZSIPOBKRDSBYVLMXGSSKF6YNPIB7Y77ITLVL6';
+      var destAsset = new StellarBase.Asset(
+        'USD',
+        'GDGU5OAPHNPU5UCLE5RDJHG7PXZFQYWKCFOEXSXNMR6KRQRI5T6XXCD7'
+      );
+      var destMin = '3.1415000';
+      var path = [
+        new StellarBase.Asset(
+          'USD',
+          'GBBM6BKZPEHWYO3E3YKREDPQXMS4VK35YLNU7NFBRI26RAN7GI5POFBB'
+        )
+      ];
+      expect(() => {
+        StellarBase.Operation.pathPaymentStrictSend({
+          sendAsset,
+          sendAmount,
+          destination,
+          destAsset,
+          destMin,
+          path,
+          source
+        });
+      }).to.throw(/destination is invalid/);
+    });
     it('fails to create path payment operation with an invalid destination address', function() {
       let opts = {
         destination: 'GCEZW',
@@ -543,7 +516,7 @@ describe('Operation', function() {
   });
 
   describe('.allowTrust()', function() {
-    it('creates a allowTrustOp', function() {
+    it('creates an allowTrustOp', function() {
       let trustor = 'GDGU5OAPHNPU5UCLE5RDJHG7PXZFQYWKCFOEXSXNMR6KRQRI5T6XXCD7';
       let assetCode = 'USD';
       let authorize = true;
@@ -560,7 +533,7 @@ describe('Operation', function() {
       expect(obj.type).to.be.equal('allowTrust');
       expect(obj.trustor).to.be.equal(trustor);
       expect(obj.assetCode).to.be.equal(assetCode);
-      expect(obj.authorize).to.be.equal(authorize);
+      expect(obj.authorize).to.be.equal(1);
     });
 
     it('fails to create allowTrust operation with an invalid trustor address', function() {
@@ -712,13 +685,19 @@ describe('Operation', function() {
       const account = new StellarBase.Account(keypair.publicKey(), '0');
 
       // First operation do nothing.
-      const tx1 = new StellarBase.TransactionBuilder(account, { fee: 100 })
+      const tx1 = new StellarBase.TransactionBuilder(account, {
+        fee: 100,
+        networkPassphrase: 'Some Network'
+      })
         .addOperation(StellarBase.Operation.setOptions({}))
         .setTimeout(StellarBase.TimeoutInfinite)
         .build();
 
       // Second operation unset homeDomain
-      const tx2 = new StellarBase.TransactionBuilder(account, { fee: 100 })
+      const tx2 = new StellarBase.TransactionBuilder(account, {
+        fee: 100,
+        networkPassphrase: 'Some Network'
+      })
         .addOperation(StellarBase.Operation.setOptions({ homeDomain: '' }))
         .setTimeout(StellarBase.TimeoutInfinite)
         .build();
@@ -852,52 +831,6 @@ describe('Operation', function() {
     });
   });
 
-  describe('.manageOffer', function() {
-    beforeEach(function() {
-      sinon.spy(console, 'log');
-    });
-
-    afterEach(function() {
-      console.log.restore();
-    });
-
-    it('creates a manageSellOfferOp (string price) (and warns)', function() {
-      var opts = {};
-      opts.selling = new StellarBase.Asset(
-        'USD',
-        'GDGU5OAPHNPU5UCLE5RDJHG7PXZFQYWKCFOEXSXNMR6KRQRI5T6XXCD7'
-      );
-      opts.buying = new StellarBase.Asset(
-        'USD',
-        'GDGU5OAPHNPU5UCLE5RDJHG7PXZFQYWKCFOEXSXNMR6KRQRI5T6XXCD7'
-      );
-      opts.amount = '3.1234560';
-      opts.price = '8.141592';
-      opts.offerId = '1';
-      let op = StellarBase.Operation.manageOffer(opts);
-
-      expect(console.log).to.be.called;
-
-      var xdr = op.toXDR('hex');
-      var operation = StellarBase.xdr.Operation.fromXDR(
-        Buffer.from(xdr, 'hex')
-      );
-      var obj = StellarBase.Operation.fromXDRObject(operation);
-      expect(obj.type).to.be.equal('manageSellOffer');
-      expect(obj.selling.equals(opts.selling)).to.be.true;
-      expect(obj.buying.equals(opts.buying)).to.be.true;
-      expect(
-        operation
-          .body()
-          .value()
-          .amount()
-          .toString()
-      ).to.be.equal('31234560');
-      expect(obj.amount).to.be.equal(opts.amount);
-      expect(obj.price).to.be.equal(opts.price);
-      expect(obj.offerId).to.be.equal(opts.offerId);
-    });
-  });
   describe('.manageSellOffer', function() {
     it('creates a manageSellOfferOp (string price)', function() {
       var opts = {};
@@ -1434,51 +1367,6 @@ describe('Operation', function() {
     });
   });
 
-  describe('.createPassiveOffer', function() {
-    beforeEach(function() {
-      sinon.spy(console, 'log');
-    });
-
-    afterEach(function() {
-      console.log.restore();
-    });
-
-    it('creates a createPassiveSellOfferOp (string price) (and warns)', function() {
-      var opts = {};
-      opts.selling = new StellarBase.Asset(
-        'USD',
-        'GDGU5OAPHNPU5UCLE5RDJHG7PXZFQYWKCFOEXSXNMR6KRQRI5T6XXCD7'
-      );
-      opts.buying = new StellarBase.Asset(
-        'USD',
-        'GDGU5OAPHNPU5UCLE5RDJHG7PXZFQYWKCFOEXSXNMR6KRQRI5T6XXCD7'
-      );
-      opts.amount = '11.2782700';
-      opts.price = '3.07';
-      let op = StellarBase.Operation.createPassiveOffer(opts);
-
-      expect(console.log).to.be.called;
-
-      var xdr = op.toXDR('hex');
-      var operation = StellarBase.xdr.Operation.fromXDR(
-        Buffer.from(xdr, 'hex')
-      );
-      var obj = StellarBase.Operation.fromXDRObject(operation);
-      expect(obj.type).to.be.equal('createPassiveSellOffer');
-      expect(obj.selling.equals(opts.selling)).to.be.true;
-      expect(obj.buying.equals(opts.buying)).to.be.true;
-      expect(
-        operation
-          .body()
-          .value()
-          .amount()
-          .toString()
-      ).to.be.equal('112782700');
-      expect(obj.amount).to.be.equal(opts.amount);
-      expect(obj.price).to.be.equal(opts.price);
-    });
-  });
-
   describe('.createPassiveSellOffer', function() {
     it('creates a createPassiveSellOfferOp (string price)', function() {
       var opts = {};
@@ -1644,7 +1532,16 @@ describe('Operation', function() {
       expect(obj.type).to.be.equal('accountMerge');
       expect(obj.destination).to.be.equal(opts.destination);
     });
-
+    it('does not support muxed accounts', function() {
+      var opts = {};
+      opts.destination =
+        'MAAAAAAAAAAAAAB7BQ2L7E5NBWMXDUCMZSIPOBKRDSBYVLMXGSSKF6YNPIB7Y77ITLVL6';
+      opts.source =
+        'MAAAAAAAAAAAAAB7BQ2L7E5NBWMXDUCMZSIPOBKRDSBYVLMXGSSKF6YNPIB7Y77ITLVL6';
+      expect(() => {
+        StellarBase.Operation.accountMerge(opts);
+      }).to.throw(/destination is invalid/);
+    });
     it('fails to create accountMerge operation with an invalid destination address', function() {
       let opts = {
         destination: 'GCEZW'
@@ -1840,6 +1737,558 @@ describe('Operation', function() {
           '12',
           (value) => value < 10
         );
+      }).to.throw();
+    });
+  });
+
+  describe('createClaimableBalance()', function() {
+    it('creates a CreateClaimableBalanceOp', function() {
+      const asset = new StellarBase.Asset(
+        'USD',
+        'GDGU5OAPHNPU5UCLE5RDJHG7PXZFQYWKCFOEXSXNMR6KRQRI5T6XXCD7'
+      );
+      const amount = '100.0000000';
+      const claimants = [
+        new StellarBase.Claimant(
+          'GCEZWKCA5VLDNRLN3RPRJMRZOX3Z6G5CHCGSNFHEYVXM3XOJMDS674JZ'
+        )
+      ];
+
+      const op = StellarBase.Operation.createClaimableBalance({
+        asset,
+        amount,
+        claimants
+      });
+      var xdr = op.toXDR('hex');
+      var operation = StellarBase.xdr.Operation.fromXDR(
+        Buffer.from(xdr, 'hex')
+      );
+      var obj = StellarBase.Operation.fromXDRObject(operation);
+      expect(obj.type).to.be.equal('createClaimableBalance');
+      expect(obj.asset.toString()).to.equal(asset.toString());
+      expect(obj.amount).to.be.equal(amount);
+      expect(obj.claimants).to.have.lengthOf(1);
+      expect(obj.claimants[0].toXDRObject().toXDR('hex')).to.equal(
+        claimants[0].toXDRObject().toXDR('hex')
+      );
+    });
+    it('throws an error when asset is not present', function() {
+      const amount = '100.0000000';
+      const claimants = [
+        new StellarBase.Claimant(
+          'GCEZWKCA5VLDNRLN3RPRJMRZOX3Z6G5CHCGSNFHEYVXM3XOJMDS674JZ'
+        )
+      ];
+
+      const attrs = {
+        amount,
+        claimants
+      };
+
+      expect(() =>
+        StellarBase.Operation.createClaimableBalance(attrs)
+      ).to.throw(
+        /must provide an asset for create claimable balance operation/
+      );
+    });
+    it('throws an error when amount is not present', function() {
+      const asset = new StellarBase.Asset(
+        'USD',
+        'GDGU5OAPHNPU5UCLE5RDJHG7PXZFQYWKCFOEXSXNMR6KRQRI5T6XXCD7'
+      );
+      const claimants = [
+        new StellarBase.Claimant(
+          'GCEZWKCA5VLDNRLN3RPRJMRZOX3Z6G5CHCGSNFHEYVXM3XOJMDS674JZ'
+        )
+      ];
+
+      const attrs = {
+        asset,
+        claimants
+      };
+
+      expect(() =>
+        StellarBase.Operation.createClaimableBalance(attrs)
+      ).to.throw(
+        /amount argument must be of type String, represent a positive number and have at most 7 digits after the decimal/
+      );
+    });
+    it('throws an error when claimants is empty or not present', function() {
+      const asset = new StellarBase.Asset(
+        'USD',
+        'GDGU5OAPHNPU5UCLE5RDJHG7PXZFQYWKCFOEXSXNMR6KRQRI5T6XXCD7'
+      );
+      const amount = '100.0000';
+
+      const attrs = {
+        asset,
+        amount
+      };
+
+      expect(() =>
+        StellarBase.Operation.createClaimableBalance(attrs)
+      ).to.throw(/must provide at least one claimant/);
+
+      attrs.claimants = [];
+      expect(() =>
+        StellarBase.Operation.createClaimableBalance(attrs)
+      ).to.throw(/must provide at least one claimant/);
+    });
+  });
+
+  describe('claimClaimableBalance()', function() {
+    it('creates a claimClaimableBalanceOp', function() {
+      const balanceId =
+        '00000000da0d57da7d4850e7fc10d2a9d0ebc731f7afb40574c03395b17d49149b91f5be';
+
+      const op = StellarBase.Operation.claimClaimableBalance({ balanceId });
+      var xdr = op.toXDR('hex');
+      var operation = StellarBase.xdr.Operation.fromXDR(
+        Buffer.from(xdr, 'hex')
+      );
+      var obj = StellarBase.Operation.fromXDRObject(operation);
+      expect(obj.type).to.be.equal('claimClaimableBalance');
+      expect(obj.balanceId).to.equal(balanceId);
+    });
+    it('throws an error when balanceId is not present', function() {
+      expect(() => StellarBase.Operation.claimClaimableBalance({})).to.throw(
+        /must provide a valid claimable balance id/
+      );
+    });
+    it('throws an error for invalid balanceIds', function() {
+      expect(() =>
+        StellarBase.Operation.claimClaimableBalance({
+          balanceId: 'badc0ffee'
+        })
+      ).to.throw(/must provide a valid claimable balance id/);
+    });
+  });
+
+  describe('clawbackClaimableBalance()', function() {
+    it('creates a clawbackClaimableBalanceOp', function() {
+      const balanceId =
+        '00000000da0d57da7d4850e7fc10d2a9d0ebc731f7afb40574c03395b17d49149b91f5be';
+
+      const op = StellarBase.Operation.clawbackClaimableBalance({
+        balanceId: balanceId
+      });
+      var xdr = op.toXDR('hex');
+      var operation = StellarBase.xdr.Operation.fromXDR(
+        Buffer.from(xdr, 'hex')
+      );
+      var obj = StellarBase.Operation.fromXDRObject(operation);
+      expect(obj.type).to.be.equal('clawbackClaimableBalance');
+      expect(obj.balanceId).to.equal(balanceId);
+    });
+    it('throws an error when balanceId is not present', function() {
+      expect(() => StellarBase.Operation.clawbackClaimableBalance({})).to.throw(
+        /must provide a valid claimable balance id/
+      );
+    });
+    it('throws an error for invalid balanceIds', function() {
+      expect(() =>
+        StellarBase.Operation.clawbackClaimableBalance({
+          balanceId: 'badc0ffee'
+        })
+      ).to.throw(/must provide a valid claimable balance id/);
+    });
+  });
+
+  describe('beginSponsoringFutureReserves()', function() {
+    it('creates a beginSponsoringFutureReservesOp', function() {
+      const sponsoredId =
+        'GDGU5OAPHNPU5UCLE5RDJHG7PXZFQYWKCFOEXSXNMR6KRQRI5T6XXCD7';
+
+      const op = StellarBase.Operation.beginSponsoringFutureReserves({
+        sponsoredId
+      });
+      var xdr = op.toXDR('hex');
+
+      var operation = StellarBase.xdr.Operation.fromXDR(xdr, 'hex');
+      expect(operation.body().switch().name).to.equal(
+        'beginSponsoringFutureReserves'
+      );
+      var obj = StellarBase.Operation.fromXDRObject(operation);
+      expect(obj.type).to.be.equal('beginSponsoringFutureReserves');
+      expect(obj.sponsoredId).to.equal(sponsoredId);
+    });
+    it('throws an error when sponsoredId is invalid', function() {
+      expect(() =>
+        StellarBase.Operation.beginSponsoringFutureReserves({})
+      ).to.throw(/sponsoredId is invalid/);
+      expect(() =>
+        StellarBase.Operation.beginSponsoringFutureReserves({
+          sponsoredId: 'GBAD'
+        })
+      ).to.throw(/sponsoredId is invalid/);
+    });
+  });
+
+  describe('endSponsoringFutureReserves()', function() {
+    it('creates a endSponsoringFutureReservesOp', function() {
+      const op = StellarBase.Operation.endSponsoringFutureReserves();
+      var xdr = op.toXDR('hex');
+
+      var operation = StellarBase.xdr.Operation.fromXDR(xdr, 'hex');
+      expect(operation.body().switch().name).to.equal(
+        'endSponsoringFutureReserves'
+      );
+      var obj = StellarBase.Operation.fromXDRObject(operation);
+      expect(obj.type).to.be.equal('endSponsoringFutureReserves');
+    });
+  });
+
+  describe('revokeAccountSponsorship()', function() {
+    it('creates a revokeAccountSponsorshipOp', function() {
+      const account =
+        'GDGU5OAPHNPU5UCLE5RDJHG7PXZFQYWKCFOEXSXNMR6KRQRI5T6XXCD7';
+      const op = StellarBase.Operation.revokeAccountSponsorship({
+        account
+      });
+      var xdr = op.toXDR('hex');
+
+      var operation = StellarBase.xdr.Operation.fromXDR(xdr, 'hex');
+      expect(operation.body().switch().name).to.equal('revokeSponsorship');
+      var obj = StellarBase.Operation.fromXDRObject(operation);
+      expect(obj.type).to.be.equal('revokeAccountSponsorship');
+      expect(obj.account).to.be.equal(account);
+    });
+    it('throws an error when account is invalid', function() {
+      expect(() => StellarBase.Operation.revokeAccountSponsorship({})).to.throw(
+        /account is invalid/
+      );
+      expect(() =>
+        StellarBase.Operation.revokeAccountSponsorship({
+          account: 'GBAD'
+        })
+      ).to.throw(/account is invalid/);
+    });
+  });
+
+  describe('revokeTrustlineSponsorship()', function() {
+    it('creates a revokeTrustlineSponsorship', function() {
+      const account =
+        'GDGU5OAPHNPU5UCLE5RDJHG7PXZFQYWKCFOEXSXNMR6KRQRI5T6XXCD7';
+      var asset = new StellarBase.Asset(
+        'USDUSD',
+        'GDGU5OAPHNPU5UCLE5RDJHG7PXZFQYWKCFOEXSXNMR6KRQRI5T6XXCD7'
+      );
+      const op = StellarBase.Operation.revokeTrustlineSponsorship({
+        account,
+        asset
+      });
+      var xdr = op.toXDR('hex');
+
+      var operation = StellarBase.xdr.Operation.fromXDR(xdr, 'hex');
+      expect(operation.body().switch().name).to.equal('revokeSponsorship');
+      var obj = StellarBase.Operation.fromXDRObject(operation);
+      expect(obj.type).to.be.equal('revokeTrustlineSponsorship');
+    });
+    it('throws an error when account is invalid', function() {
+      expect(() =>
+        StellarBase.Operation.revokeTrustlineSponsorship({})
+      ).to.throw(/account is invalid/);
+      expect(() =>
+        StellarBase.Operation.revokeTrustlineSponsorship({
+          account: 'GBAD'
+        })
+      ).to.throw(/account is invalid/);
+    });
+    it('throws an error when asset is invalid', function() {
+      expect(() =>
+        StellarBase.Operation.revokeTrustlineSponsorship({
+          account: 'GDGU5OAPHNPU5UCLE5RDJHG7PXZFQYWKCFOEXSXNMR6KRQRI5T6XXCD7'
+        })
+      ).to.throw(/asset is invalid/);
+    });
+  });
+
+  describe('revokeOfferSponsorship()', function() {
+    it('creates a revokeOfferSponsorship', function() {
+      const seller = 'GDGU5OAPHNPU5UCLE5RDJHG7PXZFQYWKCFOEXSXNMR6KRQRI5T6XXCD7';
+      var offerId = '1234';
+      const op = StellarBase.Operation.revokeOfferSponsorship({
+        seller,
+        offerId
+      });
+      var xdr = op.toXDR('hex');
+
+      var operation = StellarBase.xdr.Operation.fromXDR(xdr, 'hex');
+      expect(operation.body().switch().name).to.equal('revokeSponsorship');
+      var obj = StellarBase.Operation.fromXDRObject(operation);
+      expect(obj.type).to.be.equal('revokeOfferSponsorship');
+      expect(obj.seller).to.be.equal(seller);
+      expect(obj.offerId).to.be.equal(offerId);
+    });
+    it('throws an error when seller is invalid', function() {
+      expect(() => StellarBase.Operation.revokeOfferSponsorship({})).to.throw(
+        /seller is invalid/
+      );
+      expect(() =>
+        StellarBase.Operation.revokeOfferSponsorship({
+          seller: 'GBAD'
+        })
+      ).to.throw(/seller is invalid/);
+    });
+    it('throws an error when asset offerId is not included', function() {
+      expect(() =>
+        StellarBase.Operation.revokeOfferSponsorship({
+          seller: 'GDGU5OAPHNPU5UCLE5RDJHG7PXZFQYWKCFOEXSXNMR6KRQRI5T6XXCD7'
+        })
+      ).to.throw(/offerId is invalid/);
+    });
+  });
+
+  describe('revokeDataSponsorship()', function() {
+    it('creates a revokeDataSponsorship', function() {
+      const account =
+        'GDGU5OAPHNPU5UCLE5RDJHG7PXZFQYWKCFOEXSXNMR6KRQRI5T6XXCD7';
+      var name = 'foo';
+      const op = StellarBase.Operation.revokeDataSponsorship({
+        account,
+        name
+      });
+      var xdr = op.toXDR('hex');
+
+      var operation = StellarBase.xdr.Operation.fromXDR(xdr, 'hex');
+      expect(operation.body().switch().name).to.equal('revokeSponsorship');
+      var obj = StellarBase.Operation.fromXDRObject(operation);
+      expect(obj.type).to.be.equal('revokeDataSponsorship');
+      expect(obj.account).to.be.equal(account);
+      expect(obj.name).to.be.equal(name);
+    });
+    it('throws an error when account is invalid', function() {
+      expect(() => StellarBase.Operation.revokeDataSponsorship({})).to.throw(
+        /account is invalid/
+      );
+      expect(() =>
+        StellarBase.Operation.revokeDataSponsorship({
+          account: 'GBAD'
+        })
+      ).to.throw(/account is invalid/);
+    });
+    it('throws an error when data name is not included', function() {
+      expect(() =>
+        StellarBase.Operation.revokeDataSponsorship({
+          account: 'GDGU5OAPHNPU5UCLE5RDJHG7PXZFQYWKCFOEXSXNMR6KRQRI5T6XXCD7'
+        })
+      ).to.throw(/name must be a string, up to 64 characters/);
+    });
+  });
+
+  describe('revokeClaimableBalanceSponsorship()', function() {
+    it('creates a revokeClaimableBalanceSponsorship', function() {
+      const balanceId =
+        '00000000da0d57da7d4850e7fc10d2a9d0ebc731f7afb40574c03395b17d49149b91f5be';
+      const op = StellarBase.Operation.revokeClaimableBalanceSponsorship({
+        balanceId
+      });
+      var xdr = op.toXDR('hex');
+
+      var operation = StellarBase.xdr.Operation.fromXDR(xdr, 'hex');
+      expect(operation.body().switch().name).to.equal('revokeSponsorship');
+      var obj = StellarBase.Operation.fromXDRObject(operation);
+      expect(obj.type).to.be.equal('revokeClaimableBalanceSponsorship');
+      expect(obj.balanceId).to.be.equal(balanceId);
+    });
+    it('throws an error when balanceId is invalid', function() {
+      expect(() =>
+        StellarBase.Operation.revokeClaimableBalanceSponsorship({})
+      ).to.throw(/balanceId is invalid/);
+    });
+  });
+
+  describe('revokeSignerSponsorship()', function() {
+    it('creates a revokeSignerSponsorship', function() {
+      const account =
+        'GDGU5OAPHNPU5UCLE5RDJHG7PXZFQYWKCFOEXSXNMR6KRQRI5T6XXCD7';
+      let signer = {
+        ed25519PublicKey:
+          'GDGU5OAPHNPU5UCLE5RDJHG7PXZFQYWKCFOEXSXNMR6KRQRI5T6XXCD7'
+      };
+      let op = StellarBase.Operation.revokeSignerSponsorship({
+        account,
+        signer
+      });
+      let xdr = op.toXDR('hex');
+
+      let operation = StellarBase.xdr.Operation.fromXDR(xdr, 'hex');
+      expect(operation.body().switch().name).to.equal('revokeSponsorship');
+      let obj = StellarBase.Operation.fromXDRObject(operation);
+      expect(obj.type).to.be.equal('revokeSignerSponsorship');
+      expect(obj.account).to.be.equal(account);
+      expect(obj.signer.ed25519PublicKey).to.be.equal(signer.ed25519PublicKey);
+
+      // preAuthTx signer
+      signer = {
+        preAuthTx: StellarBase.hash('Tx hash').toString('hex')
+      };
+      op = StellarBase.Operation.revokeSignerSponsorship({
+        account,
+        signer
+      });
+      operation = StellarBase.xdr.Operation.fromXDR(op.toXDR('hex'), 'hex');
+      obj = StellarBase.Operation.fromXDRObject(operation);
+      expect(obj.type).to.be.equal('revokeSignerSponsorship');
+      expect(obj.account).to.be.equal(account);
+      expect(obj.signer.preAuthTx).to.be.equal(signer.preAuthTx);
+
+      // sha256Hash signer
+      signer = {
+        sha256Hash: StellarBase.hash('Hash Preimage').toString('hex')
+      };
+      op = StellarBase.Operation.revokeSignerSponsorship({
+        account,
+        signer
+      });
+      operation = StellarBase.xdr.Operation.fromXDR(op.toXDR('hex'), 'hex');
+      obj = StellarBase.Operation.fromXDRObject(operation);
+      expect(obj.type).to.be.equal('revokeSignerSponsorship');
+      expect(obj.account).to.be.equal(account);
+      expect(obj.signer.sha256Hash).to.be.equal(signer.sha256Hash);
+    });
+    it('throws an error when account is invalid', function() {
+      const signer = {
+        ed25519PublicKey:
+          'GCEZWKCA5VLDNRLN3RPRJMRZOX3Z6G5CHCGSNFHEYVXM3XOJMDS674JZ'
+      };
+      expect(() =>
+        StellarBase.Operation.revokeSignerSponsorship({
+          signer
+        })
+      ).to.throw(/account is invalid/);
+    });
+  });
+
+  describe('clawback()', function() {
+    it('requires asset, amount, account', function() {
+      let asset = new StellarBase.Asset(
+        'GCOIN',
+        'GDGU5OAPHNPU5UCLE5RDJHG7PXZFQYWKCFOEXSXNMR6KRQRI5T6XXCD7'
+      );
+      const amount = '100.0000000';
+
+      expect(() => {
+        StellarBase.Operation.clawback({
+          from: 'GDGU5OAPHNPU5UCLE5RDJHG7PXZFQYWKCFOEXSXNMR6KRQRI5T6XXCD7'
+        });
+      }).to.throw();
+      expect(() => {
+        StellarBase.Operation.clawback({ amount });
+      }).to.throw();
+      expect(() => {
+        StellarBase.Operation.clawback({ asset });
+      }).to.throw();
+      expect(() => {
+        StellarBase.Operation.clawback({});
+      }).to.throw();
+    });
+    it('returns a clawback()', function() {
+      let account = 'GDGU5OAPHNPU5UCLE5RDJHG7PXZFQYWKCFOEXSXNMR6KRQRI5T6XXCD7';
+      let asset = new StellarBase.Asset('GCOIN', account);
+      const amount = '100.0000000';
+      const op = StellarBase.Operation.clawback({
+        from: account,
+        amount: amount,
+        asset: asset
+      });
+
+      var xdr = op.toXDR('hex');
+      var operation = StellarBase.xdr.Operation.fromXDR(
+        Buffer.from(xdr, 'hex')
+      );
+      var obj = StellarBase.Operation.fromXDRObject(operation);
+      expect(obj.type).to.be.equal('clawback');
+      expect(obj.asset.equals(asset)).to.be.true;
+      expect(obj.from).to.be.equal(account);
+    });
+  });
+
+  describe('setTrustLineFlags()', function() {
+    it('creates a SetTrustLineFlagsOp', function() {
+      let account = 'GDGU5OAPHNPU5UCLE5RDJHG7PXZFQYWKCFOEXSXNMR6KRQRI5T6XXCD7';
+      let asset = new StellarBase.Asset('GCOIN', account);
+
+      const op = StellarBase.Operation.setTrustLineFlags({
+        trustor: account,
+        asset: asset,
+        flags: {
+          authorized: false,
+          authorizedToMaintainLiabilities: true,
+          clawbackEnabled: false
+        }
+      });
+      const opBody = op.body().setTrustLineFlagsOp();
+      expect(opBody.clearFlags()).to.be.equal(1 | 4);
+      expect(opBody.setFlags()).to.be.equal(2);
+
+      var xdr = op.toXDR('hex');
+      var operation = StellarBase.xdr.Operation.fromXDR(
+        Buffer.from(xdr, 'hex')
+      );
+      var obj = StellarBase.Operation.fromXDRObject(operation);
+      expect(obj.type).to.be.equal('setTrustLineFlags');
+      expect(obj.asset.equals(asset)).to.be.true;
+      expect(obj.trustor).to.be.equal(account);
+      expect(obj.flags.authorized).to.be.false;
+      expect(obj.flags.authorizedToMaintainLiabilities).to.be.true;
+      expect(obj.flags.clawbackEnabled).to.be.false;
+    });
+    it('leaves unmodified flags as undefined', function() {
+      let account = 'GDGU5OAPHNPU5UCLE5RDJHG7PXZFQYWKCFOEXSXNMR6KRQRI5T6XXCD7';
+      let asset = new StellarBase.Asset('GCOIN', account);
+
+      expect(() =>
+        StellarBase.Operation.setTrustLineFlags({
+          trustor: account,
+          asset: asset
+        })
+      ).to.throw();
+      expect(() =>
+        StellarBase.Operation.setTrustLineFlags({
+          trustor: account,
+          asset: asset,
+          flags: []
+        })
+      ).to.throw();
+
+      const op = StellarBase.Operation.setTrustLineFlags({
+        trustor: account,
+        asset: asset,
+        flags: {
+          authorized: true
+        }
+      });
+      const opBody = op.body().setTrustLineFlagsOp();
+      expect(opBody.setFlags()).to.be.equal(1);
+
+      var xdr = op.toXDR('hex');
+      var operation = StellarBase.xdr.Operation.fromXDR(
+        Buffer.from(xdr, 'hex')
+      );
+      var obj = StellarBase.Operation.fromXDRObject(operation);
+      expect(obj.type).to.be.equal('setTrustLineFlags');
+      expect(obj.asset.equals(asset)).to.be.true;
+      expect(obj.trustor).to.be.equal(account);
+      expect(obj.flags.authorized).to.be.true;
+      expect(obj.flags.authorizedToMaintainLiabilities).to.be.undefined;
+      expect(obj.flags.clawbackEnabled).to.be.undefined;
+    });
+    it('fails with invalid flags', function() {
+      expect(() => {
+        StellarBase.Operation.setTrustLineFlags({
+          trustor: account,
+          asset: asset,
+          flags: {
+            authorized: false,
+            invalidFlag: true
+          }
+        });
+      }).to.throw();
+    });
+    it('should require parameters', function() {
+      expect(() => {
+        StellarBase.Operation.setTrustLineFlags({});
       }).to.throw();
     });
   });

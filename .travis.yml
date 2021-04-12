@@ -1,11 +1,12 @@
 language: node_js
+version: 1.0
 matrix:
   include:
-    - node_js: 10.16.3
-    - node_js: 11
     - node_js: 12
+    - node_js: 13
+    - node_js: 14
       env: TYPE_TEST=true
-    - node_js: 12
+    - node_js: 14
       env: SAUCE=true
 cache:
   directories:
@@ -47,17 +48,18 @@ before_deploy: gulp build
 after_deploy: './after_deploy.sh'
 deploy:
   - provider: npm
+    edge: true
     email: npm@stellar.org
     api_key: $NPM_TOKEN
     skip_cleanup: true
     on:
       tags: true
       repo: stellar/js-stellar-base
-      node: 10.16.3
+      node: 12
   - provider: script
     script: './bower_publish.sh'
     skip_cleanup: true
     on:
       tags: true
       repo: stellar/js-stellar-base
-      node: 10.16.3
+      node: 12

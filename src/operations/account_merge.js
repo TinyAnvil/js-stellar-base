@@ -1,6 +1,5 @@
 import xdr from '../generated/stellar-xdr_generated';
-import { Keypair } from '../keypair';
-import { StrKey } from '../strkey';
+import { decodeAddressToMuxedAccount } from '../util/decode_encode_muxed_account';
 
 /**
  * Transfers native balance to destination account.
@@ -13,12 +12,13 @@ import { StrKey } from '../strkey';
  */
 export function accountMerge(opts) {
   const opAttributes = {};
-  if (!StrKey.isValidEd25519PublicKey(opts.destination)) {
+  try {
+    opAttributes.body = xdr.OperationBody.accountMerge(
+      decodeAddressToMuxedAccount(opts.destination)
+    );
+  } catch (e) {
     throw new Error('destination is invalid');
   }
-  opAttributes.body = xdr.OperationBody.accountMerge(
-    Keypair.fromPublicKey(opts.destination).xdrAccountId()
-  );
   this.setSourceAccount(opAttributes, opts);
 
   return new xdr.Operation(opAttributes);
